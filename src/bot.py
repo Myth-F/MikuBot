@@ -1,10 +1,12 @@
 import logging
+import re
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from .config import Config
+from .image_service import MikuImageService
 from .tts import TTSService
 
 logging.basicConfig(
@@ -12,6 +14,17 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("mikubot")
+
+
+def _build_filename_prefix(text: str, max_length: int = 32) -> str:
+    prefix = text.strip()
+    if not prefix:
+        return "miku"
+    prefix = prefix[:max_length]
+    prefix = re.sub(r"\s+", "_", prefix)
+    prefix = re.sub(r"[^A-Za-z0-9_-]", "", prefix)
+    prefix = prefix.strip("._-")
+    return prefix or "miku"
 
 
 def create_bot(config: Config) -> commands.Bot:
@@ -23,6 +36,11 @@ def create_bot(config: Config) -> commands.Bot:
     logger.info("Initializing TTS service...")
     tts = TTSService(config.fish_api_key, config.fish_model_id, config.cache_dir)
     logger.info("TTS service initialized")
+    image_service = MikuImageService(
+        config.miku_image_dir,
+        config.miku_image_api_url,
+        config.miku_font_path,
+    )
 
     @bot.event
     async def on_ready():
@@ -47,7 +65,21 @@ def create_bot(config: Config) -> commands.Bot:
         await interaction.response.defer()
         try:
             audio_path = await tts.generate(text)
-            await interaction.followup.send(file=discord.File(audio_path))
+            filename_prefix = _build_filename_prefix(text)
+            audio_filename = f"{filename_prefix}.mp3"
+            audio_file = discord.File(audio_path, filename=audio_filename)
+            image_file = None
+            try:
+                image_bytes = await image_service.generate(text)
+                image_filename = f"{filename_prefix}.png"
+                image_file = discord.File(image_bytes, filename=image_filename)
+            except Exception as image_error:
+                logger.warning("Image generation failed: %s", image_error)
+
+            if image_file:
+                await interaction.followup.send(files=[audio_file, image_file])
+            else:
+                await interaction.followup.send(file=audio_file)
         except Exception as e:
             logger.exception(f"Error generating TTS: {e}")
             await interaction.followup.send(f"Erreur lors de la génération : {e}")
