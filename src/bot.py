@@ -1,6 +1,7 @@
 import logging
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from .config import Config
@@ -26,52 +27,69 @@ def create_bot(config: Config) -> commands.Bot:
     @bot.event
     async def on_ready():
         logger.info(f"MikuBot connected as {bot.user}")
+        try:
+            synced = await bot.tree.sync()
+            logger.info(f"Synced {len(synced)} slash commands")
+        except Exception as e:
+            logger.error(f"Failed to sync commands: {e}")
 
-    @bot.command(name="miku")
-    async def miku_speak(ctx: commands.Context, *, text: str):
+    @bot.tree.command(name="miku", description="Generate a Miku voice clip from text")
+    @app_commands.describe(text="The text for Miku to say")
+    async def miku_speak(interaction: discord.Interaction, text: str):
         """Generate a Miku voice clip from text."""
         if len(text) > config.max_message_length:
-            await ctx.reply(
-                f"Message trop long ! Max {config.max_message_length} caractères."
+            await interaction.response.send_message(
+                f"Message trop long ! Max {config.max_message_length} caractères.",
+                ephemeral=True,
             )
             return
 
-        async with ctx.typing():
-            try:
-                audio_path = await tts.generate(text)
-                await ctx.reply(file=discord.File(audio_path))
-            except Exception as e:
-                await ctx.reply(f"Erreur lors de la génération : {e}")
+        await interaction.response.defer()
+        try:
+            audio_path = await tts.generate(text)
+            await interaction.followup.send(file=discord.File(audio_path))
+        except Exception as e:
+            logger.exception(f"Error generating TTS: {e}")
+            await interaction.followup.send(f"Erreur lors de la génération : {e}")
 
-    @bot.command(name="mikuvc")
-    async def miku_voice(ctx: commands.Context, *, text: str):
+    @bot.tree.command(
+        name="mikuvc", description="Generate and play Miku voice in voice channel"
+    )
+    @app_commands.describe(text="The text for Miku to say")
+    async def miku_voice(interaction: discord.Interaction, text: str):
         """Generate and play Miku voice in voice channel."""
-        if not ctx.author.voice:
-            await ctx.reply("Tu dois être dans un salon vocal !")
+        if not interaction.user.voice:
+            await interaction.response.send_message(
+                "Tu dois être dans un salon vocal !", ephemeral=True
+            )
             return
 
         if len(text) > config.max_message_length:
-            await ctx.reply(
-                f"Message trop long :/ Max {config.max_message_length} caractères."
+            await interaction.response.send_message(
+                f"Message trop long ! Max {config.max_message_length} caractères.",
+                ephemeral=True,
             )
             return
 
-        async with ctx.typing():
-            try:
-                audio_path = await tts.generate(text)
+        await interaction.response.defer()
+        try:
+            audio_path = await tts.generate(text)
 
-                vc = ctx.voice_client
-                if not vc:
-                    vc = await ctx.author.voice.channel.connect()
+            vc = interaction.guild.voice_client
+            if not vc:
+                vc = await interaction.user.voice.channel.connect()
 
-                vc.play(discord.FFmpegPCMAudio(str(audio_path)))
+            vc.play(discord.FFmpegPCMAudio(str(audio_path)))
 
-                while vc.is_playing():
-                    await discord.utils.sleep_until(discord.utils.utcnow())
+            await interaction.followup.send(f"Playing: {text}")
 
-                await vc.disconnect()
-            except Exception as e:
-                await ctx.reply(f"Erreur : {e}")
+            while vc.is_playing():
+                await discord.utils.sleep_until(discord.utils.utcnow())
+
+            await vc.disconnect()
+        except Exception as e:
+            logger.exception(f"Error in voice playback: {e}")
+            await interaction.followup.send(f"Erreur : {e}")
 
     return bot
 
