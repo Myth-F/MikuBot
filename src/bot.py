@@ -41,7 +41,7 @@ def create_bot(config: Config) -> commands.Bot:
 
         if len(text) > config.max_message_length:
             await ctx.reply(
-                f"Message trop long ! Max {config.max_message_length} caractères."
+                f"Message trop long :/ Max {config.max_message_length} caractères."
             )
             return
 
