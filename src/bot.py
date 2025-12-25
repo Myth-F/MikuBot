@@ -1,20 +1,31 @@
+import logging
+
 import discord
 from discord.ext import commands
 
 from .config import Config
 from .tts import TTSService
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("mikubot")
+
 
 def create_bot(config: Config) -> commands.Bot:
+    logger.info("Creating bot...")
     intents = discord.Intents.default()
     intents.message_content = True
 
     bot = commands.Bot(command_prefix="!", intents=intents)
+    logger.info("Initializing TTS service...")
     tts = TTSService(config.fish_api_key, config.fish_model_id, config.cache_dir)
+    logger.info("TTS service initialized")
 
     @bot.event
     async def on_ready():
-        print(f"MikuBot connected as {bot.user}")
+        logger.info(f"MikuBot connected as {bot.user}")
 
     @bot.command(name="miku")
     async def miku_speak(ctx: commands.Context, *, text: str):
@@ -66,9 +77,16 @@ def create_bot(config: Config) -> commands.Bot:
 
 
 def main():
-    config = Config.from_env()
-    bot = create_bot(config)
-    bot.run(config.discord_token)
+    logger.info("Starting MikuBot...")
+    try:
+        config = Config.from_env()
+        logger.info("Config loaded successfully")
+        bot = create_bot(config)
+        logger.info("Bot created, connecting to Discord...")
+        bot.run(config.discord_token)
+    except Exception as e:
+        logger.exception(f"Fatal error: {e}")
+        raise
 
 
 if __name__ == "__main__":
