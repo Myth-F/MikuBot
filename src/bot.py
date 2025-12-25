@@ -51,10 +51,13 @@ def create_bot(config: Config) -> commands.Bot:
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}")
 
-    @bot.tree.command(name="miku", description="Generate a Miku voice clip from text")
-    @app_commands.describe(text="The text for Miku to say")
+    @bot.tree.command(
+        name="miku",
+        description="Genere un clip vocal de Miku et une image avec ton message",
+    )
+    @app_commands.describe(text="Le texte que Miku doit dire")
     async def miku_speak(interaction: discord.Interaction, text: str):
-        """Generate a Miku voice clip from text."""
+        """Genere un clip vocal et une image de Miku avec le message."""
         if len(text) > config.max_message_length:
             await interaction.response.send_message(
                 f"Message trop long ! Max {config.max_message_length} caractères.",
@@ -83,45 +86,6 @@ def create_bot(config: Config) -> commands.Bot:
         except Exception as e:
             logger.exception(f"Error generating TTS: {e}")
             await interaction.followup.send(f"Erreur lors de la génération : {e}")
-
-    @bot.tree.command(
-        name="mikuvc", description="Generate and play Miku voice in voice channel"
-    )
-    @app_commands.describe(text="The text for Miku to say")
-    async def miku_voice(interaction: discord.Interaction, text: str):
-        """Generate and play Miku voice in voice channel."""
-        if not interaction.user.voice:
-            await interaction.response.send_message(
-                "Tu dois être dans un salon vocal !", ephemeral=True
-            )
-            return
-
-        if len(text) > config.max_message_length:
-            await interaction.response.send_message(
-                f"Message trop long ! Max {config.max_message_length} caractères.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.response.defer()
-        try:
-            audio_path = await tts.generate(text)
-
-            vc = interaction.guild.voice_client
-            if not vc:
-                vc = await interaction.user.voice.channel.connect()
-
-            vc.play(discord.FFmpegPCMAudio(str(audio_path)))
-
-            await interaction.followup.send(f"Playing: {text}")
-
-            while vc.is_playing():
-                await discord.utils.sleep_until(discord.utils.utcnow())
-
-            await vc.disconnect()
-        except Exception as e:
-            logger.exception(f"Error in voice playback: {e}")
-            await interaction.followup.send(f"Erreur : {e}")
 
     return bot
 
