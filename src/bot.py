@@ -38,7 +38,7 @@ def create_bot(config: Config) -> commands.Bot:
     logger.info("TTS service initialized")
     image_service = MikuImageService(
         config.miku_image_dir,
-        config.miku_image_api_url,
+        config.miku_image_api_urls,
         config.miku_font_path,
     )
 

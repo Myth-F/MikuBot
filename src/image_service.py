@@ -3,6 +3,7 @@ import json
 import logging
 import random
 from pathlib import Path
+from urllib.parse import urljoin
 
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
@@ -14,11 +15,11 @@ class MikuImageService:
     def __init__(
         self,
         image_dir: str | None,
-        image_api_url: str | None,
+        image_api_urls: list[str] | None,
         font_path: str | None,
     ) -> None:
         self.image_dir = Path(image_dir) if image_dir else None
-        self.image_api_url = image_api_url
+        self.image_api_urls = [url for url in (image_api_urls or []) if url]
         self.font_path = font_path
         self.supported_exts = {".png", ".jpg", ".jpeg", ".webp"}
 
@@ -37,33 +38,48 @@ class MikuImageService:
             return None
         return random.choice(candidates)
 
+    async def _fetch_remote_image_bytes_from(
+        self,
+        session: aiohttp.ClientSession,
+        api_url: str,
+    ) -> bytes:
+        async with session.get(api_url) as response:
+            response.raise_for_status()
+            content_type = response.headers.get("Content-Type", "")
+            payload = await response.read()
+
+        data = None
+        if "application/json" in content_type or payload[:1] in {b"{", b"["}:
+            try:
+                data = json.loads(payload.decode("utf-8"))
+            except Exception:
+                data = None
+
+        if data is not None:
+            image_url = self._extract_image_url(data)
+            if not image_url:
+                raise ValueError("No image URL found in API response")
+            image_url = urljoin(api_url, image_url)
+            async with session.get(image_url) as image_response:
+                image_response.raise_for_status()
+                return await image_response.read()
+
+        return payload
+
     async def _fetch_remote_image_bytes(self) -> bytes:
-        if not self.image_api_url:
-            raise ValueError("Missing image API URL")
+        if not self.image_api_urls:
+            raise ValueError("Missing image API URLs")
 
         timeout = aiohttp.ClientTimeout(total=20)
+        errors = []
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(self.image_api_url) as response:
-                response.raise_for_status()
-                content_type = response.headers.get("Content-Type", "")
-                payload = await response.read()
-
-            data = None
-            if "application/json" in content_type or payload[:1] in {b"{", b"["}:
+            for api_url in self.image_api_urls:
                 try:
-                    data = json.loads(payload.decode("utf-8"))
-                except Exception:
-                    data = None
+                    return await self._fetch_remote_image_bytes_from(session, api_url)
+                except Exception as exc:
+                    errors.append(f"{api_url}: {exc}")
 
-            if data is not None:
-                image_url = self._extract_image_url(data)
-                if not image_url:
-                    raise ValueError("No image URL found in API response")
-                async with session.get(image_url) as image_response:
-                    image_response.raise_for_status()
-                    return await image_response.read()
-
-            return payload
+        raise RuntimeError("All image providers failed: " + "; ".join(errors))
 
     async def _fetch_image_bytes(self) -> bytes:
         local_image = self._pick_local_image()
